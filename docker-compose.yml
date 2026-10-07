@@ -1,0 +1,85 @@
+# Development stack: docker compose up --build
+#   client  http://localhost:5173   (open this one)
+#   api     http://localhost:3000
+services:
+  mysql:
+    image: mysql:8.4
+    command: ["--mysql-native-password=ON"]
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysql -ucanvas -pcanvas -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    # Append-only persistence: after a restart Redis replays its own log, so a
+    # full rebuild from MySQL is only needed when the data is really gone.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./api
+    command: >
+      sh -c "rm -f tmp/pids/server.pid &&
+             bundle exec rails db:prepare &&
+             bundle exec rake board:ensure &&
+             bundle exec rails server -b 0.0.0.0 -p 3000"
+    environment: &api-env
+      RAILS_ENV: development
+      DB_HOST: mysql
+      DB_USER: canvas
+      DB_PASSWORD: canvas
+      REDIS_URL: redis://redis:6379/0
+      # Set to 1 for load tests, where every virtual user shares one address.
+      RATE_LIMIT_DISABLED: ${RATE_LIMIT_DISABLED:-0}
+    volumes:
+      - ./api:/app
+    ports:
+      - "3000:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  sidekiq:
+    build: ./api
+    command: bundle exec sidekiq -C config/sidekiq.yml
+    environment: *api-env
+    volumes:
+      - ./api:/app
+    depends_on:
+      api:
+        condition: service_started
+
+  client:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    environment:
+      VITE_API_PROXY: http://api:3000
+      VITE_USE_POLLING: "1"
+    volumes:
+      - ./client:/app
+      - client-node-modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  mysql-data:
+  redis-data:
+  client-node-modules:

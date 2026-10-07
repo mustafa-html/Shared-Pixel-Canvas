@@ -1,0 +1,64 @@
+# Whole application on one machine:
+#   cp .env.example .env    (then fill it in)
+#   docker compose -f docker-compose.prod.yml up -d --build
+# Put a TLS-terminating proxy in front of port 3000 and set FORCE_SSL=true.
+services:
+  mysql:
+    image: mysql:8.4
+    command: ["--mysql-native-password=ON"]
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      CANVAS_DB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql/init-prod.sh:/docker-entrypoint-initdb.d/init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysql -ucanvas -p$$CANVAS_DB_PASSWORD -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build: .
+    restart: unless-stopped
+    environment: &web-env
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?set SECRET_KEY_BASE in .env}
+      DB_HOST: mysql
+      DB_USER: canvas
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_URL: redis://redis:6379/0
+      FORCE_SSL: ${FORCE_SSL:-false}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+    ports:
+      - "3000:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  sidekiq:
+    build: .
+    restart: unless-stopped
+    command: bundle exec sidekiq -C config/sidekiq.yml
+    environment: *web-env
+    depends_on:
+      web:
+        condition: service_started
+
+volumes:
+  mysql-data:
+  redis-data:
