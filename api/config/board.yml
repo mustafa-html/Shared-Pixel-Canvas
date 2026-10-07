@@ -1,0 +1,27 @@
+# One source of truth for the board. The browser reads these values from
+# GET /api/session, so nothing here is repeated in the client.
+shared:
+  width: 512
+  height: 512
+  cooldown_ms: 5000
+  # A snapshot is taken every this many placements, which bounds how many
+  # events a rebuild has to replay.
+  snapshot_every: 5000
+  snapshots_kept: 5
+  palette:
+    - "#FFFFFF"
+    - "#E4E4E4"
+    - "#888888"
+    - "#222222"
+    - "#FFA7D1"
+    - "#E50000"
+    - "#E59500"
+    - "#A06A42"
+    - "#E5D900"
+    - "#94E044"
+    - "#02BE01"
+    - "#00D3DD"
+    - "#0083C7"
+    - "#0000EA"
+    - "#CF6EE4"
+    - "#820080"
